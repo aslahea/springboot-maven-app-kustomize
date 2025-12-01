@@ -1,0 +1,76 @@
+pipeline {
+    agent { label "k8s-node" }
+
+    parameters {
+        string(name: 'SOURCE_BUILD_NUMBER', description: 'Build number passed from CI Job')
+    }
+
+    environment {
+        AWS_REGION = 'eu-north-1'
+        AWS_CRED_ID = 'aws-ecr-creds' 
+        S3_BUCKET = "s3://jenkins-artifacts-aslahea-2025"
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Configure AWS & Download Artifact') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: AWS_CRED_ID,
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )]) {
+                    sh '''
+                        echo "Configuring AWS..."
+                        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                        aws configure set default.region $AWS_REGION
+
+                        echo "Downloading Artifact for Build: $SOURCE_BUILD_NUMBER"
+                        
+                        if [ -z "$SOURCE_BUILD_NUMBER" ]; then
+                            echo "ERROR: SOURCE_BUILD_NUMBER is empty!"
+                            exit 1
+                        fi
+
+                        aws s3 cp ${S3_BUCKET}/kustomize-pkg-${SOURCE_BUILD_NUMBER}.zip .
+                    '''
+                }
+            }
+        }
+
+        stage('Unzip Artifact') {
+            steps {
+                sh '''
+                    unzip -o kustomize-pkg-${SOURCE_BUILD_NUMBER}.zip
+                    ls -R
+                '''
+            }
+        }
+
+        stage('Deploy to Kubernetes (Kustomize)') {
+            steps {
+                dir('overlays/dev') {
+                    sh '''
+                        echo "Applying Kustomize Configuration..."
+                        kubectl apply -k .
+                    '''
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh 'sleep 5'
+                sh 'kubectl get pods -n dev'
+                sh 'kubectl get svc -n dev'
+            }
+        }
+    }
+}
