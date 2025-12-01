@@ -26,18 +26,25 @@ pipeline {
                     )
                 ]) {
                     sh '''
+                        # --- FIX START: AWS CONFIGURATION ADDED ---
+                        echo "Configuring AWS..."
+                        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                        aws configure set default.region $AWS_REGION
+                        # --- FIX END ---
+
                         if [ -z "$SOURCE_BUILD_NUMBER" ]; then
                             echo "ERROR: SOURCE_BUILD_NUMBER is empty!"
                             exit 1
                         fi
         
+                        echo "Downloading Artifact for Build: $SOURCE_BUILD_NUMBER"
                         aws s3 cp ${S3_BUCKET}/kustomize-pkg-${SOURCE_BUILD_NUMBER}.zip .
                         unzip -o kustomize-pkg-${SOURCE_BUILD_NUMBER}.zip
                     '''
                 }
             }
         }
-
 
         stage('Deploy to DEV') {
             steps {
@@ -51,7 +58,8 @@ pipeline {
         stage('Verify DEV') {
             steps {
                 sh 'sleep 5'
-                sh 'kubectl get pods -l environment=development' // or just kubectl get pods
+                // Grep used to find pods starting with dev-
+                sh 'kubectl get pods | grep dev-' 
             }
         }
 
@@ -59,7 +67,6 @@ pipeline {
         stage('Approval for PROD') {
             steps {
                 script {
-                    // This pauses the pipeline until you click "Proceed" in Jenkins UI
                     input message: 'Do you want to deploy to PRODUCTION?', ok: 'Deploy to Prod'
                 }
             }
@@ -70,8 +77,6 @@ pipeline {
             steps {
                 dir('overlays/prod') {
                     sh 'echo "Deploying to PRODUCTION..."'
-                    // Create prod namespace if needed, or use default with prefix
-                    // Here we rely on namePrefix: prod-
                     sh 'kubectl apply -k .'
                 }
             }
@@ -80,8 +85,8 @@ pipeline {
         stage('Verify PROD') {
             steps {
                 sh 'sleep 5'
-                // Check specifically for prod pods
-                sh 'kubectl get pods | grep prod'
+                // Grep used to find pods starting with prod-
+                sh 'kubectl get pods | grep prod-'
             }
         }
     }
