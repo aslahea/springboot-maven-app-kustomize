@@ -1,0 +1,166 @@
+@Library('jenkins-shared-lib') _
+
+pipeline {
+    agent { label "worker" }
+
+    tools {
+        maven 'M3'
+    }
+
+    environment {
+        JAVA_HOME = '/usr/lib/jvm/java-21-openjdk-amd64'
+        PATH = "${JAVA_HOME}/bin:${PATH}"
+
+        AWS_CRED_ID = 'aws-ecr-creds'
+        AWS_REGION = 'eu-north-1'
+        
+        S3_BUCKET = "s3://jenkins-artifacts-aslahea-2025"
+
+        DOCKER_IMAGE = "aslahea/springboot-maven-app"
+        DOCKER_CREDS_ID = "dockerCred"
+
+        SONAR_PROJECT_KEY = 'com.mycompany.app:springboot-maven-app'
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                checkout scmGit(
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[url: 'https://github.com/aslahea/springboot-maven-app.git']]
+                )
+            }
+        }
+
+        stage('Maven Build') {
+            steps {
+                sh 'mvn -B clean package -DskipTests'
+            }
+        }
+
+        stage('Unit Test') {
+            steps {
+                sh 'mvn test || true'
+                junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'TOKEN')]) {
+                        sh """
+                            mvn sonar:sonar \
+                              -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                              -Dsonar.login=${TOKEN}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            options { timeout(time: 2, unit: 'MINUTES') }
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('DockerHub Login') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: DOCKER_CREDS_ID,
+                                usernameVariable: 'DOCKER_USER',
+                                passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                }
+            }
+        }
+
+        stage('Build & Push Docker Image') {
+            steps {
+                sh """
+                    docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
+                    docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest
+                    docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                    docker push ${DOCKER_IMAGE}:latest
+                """
+            }
+        }
+
+
+        stage('Fetch Kustomize Config') {
+            steps {
+                sh 'rm -rf my-app-k8s'
+                
+                sh 'git clone https://github.com/aslahea/springboot-maven-app-kustomize.git my-app-k8s'
+            }
+        }
+
+        stage('Update Kustomize & Archive') {
+            steps {
+                script {
+                    dir('my-app-k8s') {
+                        
+                        sh """
+                            cd overlays/dev
+                            sed -i 's/newTag: latest/newTag: "${BUILD_NUMBER}"/g' kustomization.yaml
+                            
+                            cat kustomization.yaml
+                        """
+                        
+                        sh "zip -r kustomize-pkg-${BUILD_NUMBER}.zip ."
+                    }
+                }
+            }
+        }
+
+        stage('Upload to S3') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: AWS_CRED_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+        
+                    sh """
+                        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                        aws configure set default.region $AWS_REGION
+                        
+                        aws s3 cp my-app-k8s/kustomize-pkg-${BUILD_NUMBER}.zip ${S3_BUCKET}/
+                        
+                        echo "Artifact Uploaded: ${S3_BUCKET}/kustomize-pkg-${BUILD_NUMBER}.zip"
+                    """
+                }
+            }
+        }
+        
+
+        stage('Trigger Deploy Job') {
+            steps {
+                build job: 'spring-boot-kustomize-deploy', parameters: [
+                    string(name: 'SOURCE_BUILD_NUMBER', value: "${BUILD_NUMBER}")
+                ]
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+            sendEmailNotification(currentBuild.currentResult, [:])
+        }
+        failure {
+            echo 'Pipeline failed!'
+            sendEmailNotification(currentBuild.currentResult, [:])
+        }
+        aborted {
+            echo 'Pipeline aborted!'
+            sendEmailNotification(currentBuild.currentResult, [:])
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
