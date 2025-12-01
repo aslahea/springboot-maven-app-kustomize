@@ -107,10 +107,13 @@ pipeline {
                         sh """
                             cd overlays/dev
                             sed -i 's/newTag: latest/newTag: "${BUILD_NUMBER}"/g' kustomization.yaml
-                            
-                            cat kustomization.yaml
                         """
-                        
+
+                        sh """
+                           cd overlays/prod
+                           sed -i 's/newTag: latest/newTag: \"${BUILD_NUMBER}\"/g' kustomization.yaml
+                        """
+                                                    
                         sh "zip -r kustomize-pkg-${BUILD_NUMBER}.zip ."
                     }
                 }
