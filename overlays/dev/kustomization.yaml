@@ -10,7 +10,6 @@ images:
 - name: aslahea/springboot-maven-app
   newTag: latest
 
-namespace: dev
 
 commonLabels:
   environment: development
