@@ -18,25 +18,15 @@ pipeline {
 
         stage('Download Artifact') {
             steps {
-                withCredentials([usernamePassword(credentialsId: AWS_CRED_ID, usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    sh '''
-                        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-                        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-                        aws configure set default.region $AWS_REGION
-                        
-                        if [ -z "$SOURCE_BUILD_NUMBER" ]; then
-                            echo "ERROR: SOURCE_BUILD_NUMBER is empty!"
-                            exit 1
-                        fi
-
+                withAWS(credentials: AWS_CRED_ID, region: AWS_REGION) {
+                    sh """
                         aws s3 cp ${S3_BUCKET}/kustomize-pkg-${SOURCE_BUILD_NUMBER}.zip .
                         unzip -o kustomize-pkg-${SOURCE_BUILD_NUMBER}.zip
-                    '''
+                    """
                 }
             }
         }
 
-        // --- DEV DEPLOYMENT ---
         stage('Deploy to DEV') {
             steps {
                 dir('overlays/dev') {
