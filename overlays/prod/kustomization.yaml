@@ -9,6 +9,7 @@ namePrefix: prod-
 
 patches:
 - path: patch-replicas.yaml
+- path: patch-ingress.yaml
 
 images:
 - name: aslahea/springboot-maven-app
