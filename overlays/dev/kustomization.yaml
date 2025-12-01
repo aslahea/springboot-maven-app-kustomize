@@ -4,18 +4,14 @@ kind: Kustomization
 resources:
 - ../../base
 
-# This adds a prefix to all resources (e.g., dev-my-app)
 namePrefix: dev-
 
-# This is the section Jenkins will update automatically
 images:
 - name: aslahea/springboot-maven-app
   newTag: latest
 
-# Add namespace for dev environment
 namespace: dev
 
-# Add common labels for resource tracking
 commonLabels:
   environment: development
   managed-by: kustomize
