@@ -12,27 +12,17 @@ pipeline {
     }
 
     stages {
-
         stage('Clean Workspace') {
-            steps {
-                cleanWs()
-            }
+            steps { cleanWs() }
         }
 
-        stage('Configure AWS & Download Artifact') {
+        stage('Download Artifact') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: AWS_CRED_ID,
-                    usernameVariable: 'AWS_ACCESS_KEY_ID',
-                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                )]) {
+                withCredentials([usernamePassword(credentialsId: AWS_CRED_ID, usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     sh '''
-                        echo "Configuring AWS..."
                         aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
                         aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
                         aws configure set default.region $AWS_REGION
-
-                        echo "Downloading Artifact for Build: $SOURCE_BUILD_NUMBER"
                         
                         if [ -z "$SOURCE_BUILD_NUMBER" ]; then
                             echo "ERROR: SOURCE_BUILD_NUMBER is empty!"
@@ -40,36 +30,56 @@ pipeline {
                         fi
 
                         aws s3 cp ${S3_BUCKET}/kustomize-pkg-${SOURCE_BUILD_NUMBER}.zip .
+                        unzip -o kustomize-pkg-${SOURCE_BUILD_NUMBER}.zip
                     '''
                 }
             }
         }
 
-        stage('Unzip Artifact') {
-            steps {
-                sh '''
-                    unzip -o kustomize-pkg-${SOURCE_BUILD_NUMBER}.zip
-                    ls -R
-                '''
-            }
-        }
-
-        stage('Deploy to Kubernetes (Kustomize)') {
+        // --- DEV DEPLOYMENT ---
+        stage('Deploy to DEV') {
             steps {
                 dir('overlays/dev') {
-                    sh '''
-                        echo "Applying Kustomize Configuration..."
-                        kubectl apply -k .
-                    '''
+                    sh 'echo "Deploying to DEV..."'
+                    sh 'kubectl apply -k .'
                 }
             }
         }
 
-        stage('Verify Deployment') {
+        stage('Verify DEV') {
             steps {
                 sh 'sleep 5'
-                sh 'kubectl get pods -n dev'
-                sh 'kubectl get svc -n dev'
+                sh 'kubectl get pods -l environment=development' // or just kubectl get pods
+            }
+        }
+
+        // --- MANUAL APPROVAL (PROD) ---
+        stage('Approval for PROD') {
+            steps {
+                script {
+                    // This pauses the pipeline until you click "Proceed" in Jenkins UI
+                    input message: 'Do you want to deploy to PRODUCTION?', ok: 'Deploy to Prod'
+                }
+            }
+        }
+
+        // --- PROD DEPLOYMENT ---
+        stage('Deploy to PROD') {
+            steps {
+                dir('overlays/prod') {
+                    sh 'echo "Deploying to PRODUCTION..."'
+                    // Create prod namespace if needed, or use default with prefix
+                    // Here we rely on namePrefix: prod-
+                    sh 'kubectl apply -k .'
+                }
+            }
+        }
+
+        stage('Verify PROD') {
+            steps {
+                sh 'sleep 5'
+                // Check specifically for prod pods
+                sh 'kubectl get pods | grep prod'
             }
         }
     }
