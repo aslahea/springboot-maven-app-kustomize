@@ -6,7 +6,6 @@ resources:
 
 namePrefix: prod-
 
-namespace: prod
 
 patches:
 - path: patch-replicas.yaml
