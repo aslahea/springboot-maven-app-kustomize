@@ -122,22 +122,21 @@ pipeline {
 
         stage('Upload to S3') {
             steps {
-                withCredentials([usernamePassword(credentialsId: AWS_CRED_ID,
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: AWS_CRED_ID,
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
-                        passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-        
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
                     sh """
-                        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-                        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-                        aws configure set default.region $AWS_REGION
-                        
                         aws s3 cp my-app-k8s/kustomize-pkg-${BUILD_NUMBER}.zip ${S3_BUCKET}/
-                        
                         echo "Artifact Uploaded: ${S3_BUCKET}/kustomize-pkg-${BUILD_NUMBER}.zip"
                     """
                 }
             }
         }
+
         
 
         stage('Trigger Deploy Job') {
